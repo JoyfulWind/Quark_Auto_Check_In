@@ -1,30 +1,42 @@
-import os 
-import re 
-import sys 
-import requests 
+import os
+import re
+import sys
+import requests
+
+# ===================== 【新增】Server酱推送 =====================
+def server_push(title, content):
+    sckey = os.getenv("SCKEY", "")
+    if not sckey:
+        return
+    url = f"https://sctapi.ftqq.com/{sckey}.send"
+    data = {"title": title, "desp": content}
+    try:
+        requests.post(url, data=data, timeout=8)
+    except Exception:
+        pass
 
 cookie_list = os.getenv("COOKIE_QUARK").split('\n|&&')
 
 # 替代 notify 功能
 def send(title, message):
     print(f"{title}: {message}")
+    # 新增：自动调用Server酱推送
+    server_push(title, message)
 
-# 获取环境变量 
-def get_env(): 
-    # 判断 COOKIE_QUARK是否存在于环境变量 
-    if "COOKIE_QUARK" in os.environ: 
-        # 读取系统变量以 \n 或 && 分割变量 
-        cookie_list = re.split('\n|&&', os.environ.get('COOKIE_QUARK')) 
-    else: 
-        # 标准日志输出 
-        print('❌未添加COOKIE_QUARK变量') 
-        send('夸克自动签到', '❌未添加COOKIE_QUARK变量') 
-        # 脚本退出 
-        sys.exit(0) 
+# 获取环境变量
+def get_env():
+    # 判断 COOKIE_QUARK是否存在于环境变量
+    if "COOKIE_QUARK" in os.environ:
+        # 读取系统变量以 \n 或 && 分割变量
+        cookie_list = re.split('\n|&&', os.environ.get('COOKIE_QUARK'))
+    else:
+        # 标准日志输出
+        print('❌未添加COOKIE_QUARK变量')
+        send('夸克自动签到', '❌未添加COOKIE_QUARK变量')
+        # 脚本退出
+        sys.exit(0)
 
-    return cookie_list 
-
-# 其他代码...
+    return cookie_list
 
 class Quark:
     '''
@@ -64,7 +76,6 @@ class Quark:
             "vcode": self.param.get('vcode')
         }
         response = requests.get(url=url, params=querystring).json()
-        #print(response)
         if response.get("data"):
             return response["data"]
         else:
@@ -85,7 +96,6 @@ class Quark:
         }
         data = {"sign_cyclic": True}
         response = requests.post(url=url, json=data, params=querystring).json()
-        #print(response)
         if response.get("data"):
             return True, response["data"]["sign_daily_reward"]
         else:
@@ -101,7 +111,6 @@ class Quark:
             "kps": self.param.get('kps'),
         }
         response = requests.get(url=url, params=querystring).json()
-        # print(response)
         if response.get("data"):
             return response["data"]["balance"]
         else:
@@ -139,8 +148,7 @@ class Quark:
                 else:
                     log += f"❌ 签到异常: {sign_return}\n"
         else:
-            # log += f"❌ 签到异常: 获取成长信息失败\n"
-            raise Exception("❌ 签到异常: 获取成长信息失败")  # 适用于单账号情形，当 cookie 值失效后直接报错，方便通过 github action 的操作系统来进行提醒 如果你使用的是多账号签到的话，不要跟进此更新
+            raise Exception("❌ 签到异常: 获取成长信息失败")
 
         return log
 
@@ -159,11 +167,10 @@ def main():
     i = 0
     while i < len(cookie_quark):
         # 获取user_data参数
-        user_data = {}  # 用户信息
+        user_data = {}
         for a in cookie_quark[i].replace(" ", "").split(';'):
             if not a == '':
                 user_data.update({a[0:a.index('=')]: a[a.index('=') + 1:]})
-        # print(user_data)
         # 开始任务
         log = f"🙍🏻‍♂️ 第{i + 1}个账号"
         msg += log
@@ -172,8 +179,6 @@ def main():
         msg += log + "\n"
 
         i += 1
-
-    # print(msg)
 
     try:
         send('夸克自动签到', msg)

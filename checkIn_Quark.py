@@ -8,16 +8,18 @@ def server_push(title, content):
     sckey = os.getenv("SCKEY", "")
     if not sckey:
         return
-    url = f"httpssctapi.ftqq.com/{sckey}.send"
+    url = f"https://sctapi.ftqq.com/{sckey}.send"
     data = {"title": title, "desp": content}
     try:
-        requests.post(url, data=data, timeout=8)
-    except Exception:
-        pass
+        # 增加超时，防止卡死不推送
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        # 打印推送错误，方便排查
+        print("Server酱推送失败：", str(e))
 
 # ===================== 【新增】防风控请求头 =====================
 headers = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4.2675 Mobile/15E148",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4 Mobile/15E148",
     "Referer": "https://drive-m.quark.cn/"
 }
 
@@ -111,7 +113,7 @@ class Quark:
         '''
         查询抽奖余额
         '''
-        url = "httpscoral2.quark.cn/currency/v1/queryBalance"
+        url = "https://coral2.quark.cn/currency/v1/queryBalance"
         querystring = {
             "moduleCode": "1f3563d38896438db994f118d4ff53cb",
             "kps": self.param.get('kps'),
@@ -154,7 +156,8 @@ class Quark:
                 else:
                     log += f"❌ 签到异常: {sign_return}\n"
         else:
-            raise Exception("❌ 签到异常: 获取成长信息失败")
+            # 【修复】不直接抛异常崩溃，只记录日志，保证后面能推送
+            log += "❌ 签到异常: 获取成长信息失败\n"
 
         return log
 
@@ -186,10 +189,13 @@ def main():
 
         i += 1
 
+    # 全局捕获错误，确保一定推送
     try:
         send('夸克自动签到', msg)
     except Exception as err:
         print('%s\n❌ 错误，请查看运行日志！' % err)
+        # 就算主线报错，也尝试推送错误信息
+        send('夸克签到【异常】', f"脚本运行出错：{str(err)}")
 
     return msg[:-1]
 

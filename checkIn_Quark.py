@@ -8,12 +8,18 @@ def server_push(title, content):
     sckey = os.getenv("SCKEY", "")
     if not sckey:
         return
-    url = f"https://sctapi.ftqq.com/{sckey}.send"
+    url = f"httpssctapi.ftqq.com/{sckey}.send"
     data = {"title": title, "desp": content}
     try:
         requests.post(url, data=data, timeout=8)
     except Exception:
         pass
+
+# ===================== 【新增】防风控请求头 =====================
+headers = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4.2675 Mobile/15E148",
+    "Referer": "https://drive-m.quark.cn/"
+}
 
 cookie_list = os.getenv("COOKIE_QUARK").split('\n|&&')
 
@@ -70,12 +76,12 @@ class Quark:
         url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/info"
         querystring = {
             "pr": "ucpro",
-            "fr": "android",
+            "fr": "iphone",
             "kps": self.param.get('kps'),
             "sign": self.param.get('sign'),
             "vcode": self.param.get('vcode')
         }
-        response = requests.get(url=url, params=querystring).json()
+        response = requests.get(url=url, params=querystring, headers=headers).json()
         if response.get("data"):
             return response["data"]
         else:
@@ -89,13 +95,13 @@ class Quark:
         url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/sign"
         querystring = {
             "pr": "ucpro",
-            "fr": "android",
+            "fr": "iphone",
             "kps": self.param.get('kps'),
             "sign": self.param.get('sign'),
             "vcode": self.param.get('vcode')
         }
         data = {"sign_cyclic": True}
-        response = requests.post(url=url, json=data, params=querystring).json()
+        response = requests.post(url=url, json=data, params=querystring, headers=headers).json()
         if response.get("data"):
             return True, response["data"]["sign_daily_reward"]
         else:
@@ -105,12 +111,12 @@ class Quark:
         '''
         查询抽奖余额
         '''
-        url = "https://coral2.quark.cn/currency/v1/queryBalance"
+        url = "httpscoral2.quark.cn/currency/v1/queryBalance"
         querystring = {
             "moduleCode": "1f3563d38896438db994f118d4ff53cb",
             "kps": self.param.get('kps'),
         }
-        response = requests.get(url=url, params=querystring).json()
+        response = requests.get(url=url, params=querystring, headers=headers).json()
         if response.get("data"):
             return response["data"]["balance"]
         else:

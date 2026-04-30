@@ -11,13 +11,19 @@ PUSH_FLAG_FILE = "/tmp/quark_sign_finish.today"
 def is_today_finished():
     if not os.path.exists(PUSH_FLAG_FILE):
         return False
-    with open(PUSH_FLAG_FILE, "r", encoding="utf-8") as f:
-        return f.read().strip() == datetime.now().strftime("%Y-%m-%d")
+    try:
+        with open(PUSH_FLAG_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip() == datetime.now().strftime("%Y-%m-%d")
+    except:
+        return False
 
 # 标记：今日已完成推送（成功/失败都标记）
 def mark_today_finished():
-    with open(PUSH_FLAG_FILE, "w", encoding="utf-8") as f:
-        f.write(datetime.now().strftime("%Y-%m-%d"))
+    try:
+        with open(PUSH_FLAG_FILE, "w", encoding="utf-8") as f:
+            f.write(datetime.now().strftime("%Y-%m-%d"))
+    except Exception as e:
+        print(f"标记文件写入失败: {str(e)}")
 
 # ===================== 【Server酱推送】 =====================
 def server_push(title, content):
@@ -94,93 +100,75 @@ class Quark:
         data = {"sign_cyclic": True}
         response = requests.post(url=url, json=data, params=querystring, headers=headers).json()
         if response.get("data"):
-            return True, response["data"]["sign_daily_reward"]
+            return True, response["data"]
         else:
-            return False, response["message"]
-
-    def queryBalance(self):
-        url = "https://coral2.quark.cn/currency/v1/queryBalance"
-        querystring = {
-            "moduleCode": "1f3563d38896438db994f118d4ff53cb",
-            "kps": self.param.get('kps'),
-        }
-        response = requests.get(url=url, params=querystring, headers=headers).json()
-        if response.get("data"):
-            return response["data"]["balance"]
-        else:
-            return response["msg"]
-
-    def do_sign(self):
-        log = ""
-        growth_info = self.get_growth_info()
-        if growth_info:
-            log += (
-                f" {'88VIP' if growth_info['88VIP'] else '普通用户'} {self.param.get('user')}\n"
-                f"💾 网盘总容量：{self.convert_bytes(growth_info['total_capacity'])}，"
-                f"签到累计容量：")
-            if "sign_reward" in growth_info['cap_composition']:
-                log += f"{self.convert_bytes(growth_info['cap_composition']['sign_reward'])}\n"
-            else:
-                log += "0 MB\n"
-            if growth_info["cap_sign"]["sign_daily"]:
-                log += (
-                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}\n"
-                    f"连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})\n"
-                )
-            else:
-                sign, sign_return = self.get_growth_sign()
-                if sign:
-                    log += (
-                        f"✅ 执行签到: 今日签到+{self.convert_bytes(sign_return)}\n"
-                        f"连签进度({growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']})\n"
-                    )
-                else:
-                    log += f"❌ 签到异常: {sign_return}\n"
-        else:
-            log += "❌ 签到异常: 获取成长信息失败\n"
-
-        return log
-
+            return False, response.get("msg", "签到失败，未知错误")
 
 def main():
-    # 核心：今日已推送 → 直接退出，不执行任何操作
-    if is_today_finished():
-        print("ℹ️ 今日已完成推送，跳过本次运行（上午失败下午会自动重试）")
-        return
-
     msg = ""
-    cookie_quark = get_env()
-    print("✅ 检测到共", len(cookie_quark), "个夸克账号\n")
-
-    i = 0
-    has_error = False  # 标记是否失败
-    while i < len(cookie_quark):
-        user_data = {}
-        for a in cookie_quark[i].replace(" ", "").split(';'):
-            if not a == '':
-                user_data.update({a[0:a.index('=')]: a[a.index('=') + 1:]})
-        log = f"🙍🏻‍♂️ 第{i + 1}个账号"
-        msg += log
-        log = Quark(user_data).do_sign()
-        msg += log + "\n"
-        # 判断是否有失败
-        if "❌" in log:
-            has_error = True
-        i += 1
-
-    # 执行推送 + 标记今日完成（全天只推这一次）
+    cookie_list = get_env()
+    success_count = 0
+    fail_count = 0
+    fail_msg = ""
+    
+    # 先检查今日是否已经推送过（无论成功/失败）
+    if is_today_finished():
+        print("📌 今日已完成推送，跳过执行")
+        return
+    
     try:
-        if has_error:
-            send("夸克签到【失败】", "签到执行失败，请前往GitHub Actions查看详细日志！\n\n" + msg)
-        else:
-            send("夸克自动签到【成功】", msg)
+        for idx, cookie in enumerate(cookie_list):
+            if not cookie:
+                continue
+            user_data = {
+                'kps': re.search(r'kps=([^;]+)', cookie).group(1) if re.search(r'kps=([^;]+)', cookie) else '',
+                'sign': re.search(r'sign=([^;]+)', cookie).group(1) if re.search(r'sign=([^;]+)', cookie) else '',
+                'vcode': re.search(r'vcode=([^;]+)', cookie).group(1) if re.search(r'vcode=([^;]+)', cookie) else ''
+            }
+            if not all(user_data.values()):
+                fail_count += 1
+                fail_msg += f"账号{idx+1}: Cookie格式错误，缺少必要参数\n"
+                continue
+            
+            q = Quark(user_data)
+            growth_info = q.get_growth_info()
+            if not growth_info:
+                fail_count += 1
+                fail_msg += f"账号{idx+1}: 获取用户信息失败\n"
+                continue
+            
+            is_signed = growth_info.get("is_signed", False)
+            if is_signed:
+                msg += f"账号{idx+1}: 今日已签到，无需重复操作\n"
+                success_count += 1
+                continue
+            
+            sign_success, sign_data = q.get_growth_sign()
+            if sign_success:
+                added = q.convert_bytes(sign_data.get("added", 0))
+                msg += f"账号{idx+1}: 签到成功！获得{added}空间\n"
+                success_count += 1
+            else:
+                fail_count += 1
+                fail_msg += f"账号{idx+1}: 签到失败 - {sign_data}\n"
+        
+        # 推送结果
+        if success_count > 0 and fail_count == 0:
+            send("夸克自动签到【全部成功】", msg)
+        elif success_count > 0 and fail_count > 0:
+            send("夸克自动签到【部分成功】", f"成功{success_count}个，失败{fail_count}个\n\n成功详情：\n{msg}\n\n失败详情：\n{fail_msg}\n\n前往GitHub Actions查看详细日志！")
+        elif fail_count > 0:
+            send("夸克自动签到【全部失败】", f"失败{fail_count}个\n\n失败详情：\n{fail_msg}\n\n前往GitHub Actions查看详细日志！")
+        
+        # 标记今日已完成推送（无论成功/失败）
         mark_today_finished()
+        
     except Exception as err:
         print(f"{err}\n❌ 脚本运行错误！")
         send("夸克签到【脚本异常】", f"脚本出错：{str(err)}，请检查Actions日志")
         mark_today_finished()
 
-    return msg[:-1]
+    return msg[:-1] if msg else ""
 
 
 if __name__ == "__main__":

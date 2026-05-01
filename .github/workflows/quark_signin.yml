@@ -2,9 +2,9 @@ name: Quark签到
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # 北京时间 09:00
-    - cron: '0 5 * * *'   # 北京时间 13:00
-  workflow_dispatch:
+    - cron: '0 1 * * *'   # 北京时间 09:00 (UTC+8 -> UTC+1)
+    - cron: '0 5 * * *'   # 北京时间 13:00 (UTC+8 -> UTC+5)
+  workflow_dispatch:      # 允许手动触发
 
 jobs:
   check-if-already-signed:
@@ -15,23 +15,12 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v3
 
-      - name: 恢复签到成功记录缓存（修复跨run读取）
+      - name: 恢复签到成功记录缓存
         id: cache-success-restore
         uses: actions/cache@v4
         with:
           path: .last_success_date
           key: last-success-marker
-          restore-keys: |
-            last-success-marker  # 🔥 关键修复：添加restore-keys确保跨run读取
-
-      - name: 调试缓存状态
-        run: |
-          echo "缓存命中: ${{ steps.cache-success-restore.outputs.cache-hit }}"
-          if [ -f .last_success_date ]; then
-            echo "缓存文件内容: $(cat .last_success_date)"
-          else
-            echo "缓存文件不存在"
-          fi
 
       - name: 判断是否已签到
         id: check
@@ -44,17 +33,17 @@ jobs:
             echo "上次签到日期: $last_date"
             if [ "$last_date" = "$current_date" ]; then
               echo "今天已成功签到，跳过执行。"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "skip=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
 
           echo "今天尚未签到，继续执行。"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
 
   sign-in:
     needs: check-if-already-signed
-    if: needs.check-if-already-signed.outputs.skip == 'false'
+    if: needs.check-if-already-signed.outputs.skip == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -101,8 +90,6 @@ jobs:
         with:
           path: .last_success_date
           key: last-success-marker
-          restore-keys: |
-            last-success-marker  # 🔥 关键修复：添加restore-keys确保跨run读取
 
       - name: 清理旧的工作流记录
         uses: Mattraks/delete-workflow-runs@main

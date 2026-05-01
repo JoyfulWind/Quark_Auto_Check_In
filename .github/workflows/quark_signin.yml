@@ -2,59 +2,71 @@ name: Quark签到
 
 on:
   schedule:
-    - cron: '0 1 * * *'
-    - cron: '0 5 * * *'
+    - cron: '0 1 * * *'   # 北京时间 09:00
+    - cron: '0 5 * * *'   # 北京时间 13:00
   workflow_dispatch:
 
 jobs:
-  check:
+  check-if-already-signed:
     runs-on: ubuntu-latest
     outputs:
-      skip: ${{ steps.check_skip.outputs.skip }}
+      skip: ${{ steps.check.outputs.skip }}
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-      # 下载上次保存的签到成功标记
-      - name: 下载签到记录
-        uses: actions/download-artifact@v4
+      # 🔥 恢复Cache：这里用固定key，确保每次都能读到最新的签到记录
+      - name: 恢复签到记录缓存
+        id: cache-restore
+        uses: actions/cache@v4
         with:
-          name: sign-record
-          path: ./
-          continue-on-error: true
+          path: .last_success_date
+          key: quark-sign-record-${{ github.repository }}
+          restore-keys: |
+            quark-sign-record-
 
-      # 判断今天是否已经签到
-      - name: 判断是否跳过
-        id: check_skip
+      - name: 判断是否已签到
+        id: check
         run: |
-          TODAY=$(TZ=Asia/Shanghai date +%Y-%m-%d)
-          echo "today=$TODAY" >> $GITHUB_ENV
+          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          echo "当前北京时间: $TODAY"
 
-          if [ -f "sign.txt" ]; then
-            LAST=$(cat sign.txt)
-            echo "last=$LAST" >> $GITHUB_ENV
-          else
-            LAST=""
+          if [ -f .last_success_date ]; then
+            LAST=$(cat .last_success_date)
+            echo "上次签到日期: $LAST"
+            if [ "$LAST" = "$TODAY" ]; then
+              echo "✅ 今日已签到，跳过执行"
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
           fi
 
-          if [ "$LAST" = "$TODAY" ]; then
-            echo "✅ 今天已签到，跳过"
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "ℹ️ 今天未签到，执行"
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
+          echo "ℹ️ 今日未签到，继续执行"
+          echo "skip=false" >> $GITHUB_OUTPUT
 
-  sign:
-    needs: check
-    if: needs.check.outputs.skip == 'false'
+  sign-in:
+    needs: check-if-already-signed
+    if: needs.check-if-already-signed.outputs.skip == 'false'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-      - name: 随机延迟
-        run: sleep $((RANDOM % 30))
+      - name: 随机延迟（早上）
+        if: github.event.schedule == '0 1 * * *'
+        run: |
+          delay=$((RANDOM % 60))
+          echo "早上签到，延迟 $delay 秒后开始.."
+          sleep $delay
 
-      - name: 安装 Python
+      - name: 随机延迟（下午/手动触发）
+        if: github.event.schedule == '0 5 * * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          delay=$((RANDOM % 30))
+          echo "下午兜底，延迟 $delay 秒后开始.."
+          sleep $delay
+
+      - name: 设置Python环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -62,25 +74,29 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-      - name: 运行签到
+      - name: 执行签到脚本
         env:
           COOKIE_QUARK: ${{ secrets.COOKIE_QUARK }}
           SCKEY: ${{ secrets.SCKEY }}
         run: python checkIn_Quark.py
 
-      # ✅ 保存今天签到成功（官方 artifact，永久有效）
-      - name: 保存签到成功日期
+      # 🔥 签到成功后写入日期
+      - name: 记录今日签到成功
+        if: success()
         run: |
-          echo $(TZ=Asia/Shanghai date +%Y-%m-%d) > sign.txt
+          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          echo "$TODAY" > .last_success_date
+          echo "✅ 已记录今日签到: $TODAY"
 
-      - name: 上传签到记录
-        uses: actions/upload-artifact@v4
+      # 🔥 保存到Cache，永久生效
+      - name: 保存签到记录缓存
+        if: success()
+        uses: actions/cache@v4
         with:
-          name: sign-record
-          path: sign.txt
-          overwrite: true
+          path: .last_success_date
+          key: quark-sign-record-${{ github.repository }}
 
-      - name: 清理旧运行
+      - name: 清理旧运行记录
         uses: Mattraks/delete-workflow-runs@main
         if: always()
         with:

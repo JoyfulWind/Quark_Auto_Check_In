@@ -1,13 +1,13 @@
-import os
-import re
-import sys
+import os 
+import re 
+import sys 
 import requests
 from datetime import datetime
 
-# ===================== 【定制功能】全天仅推送1次 + 失败重试 =====================
-PUSH_FLAG_FILE = "/tmp/quark_sign_finish.today"
+# ===================== 【新增】一天仅推送1次 =====================
+PUSH_FLAG_FILE = "/tmp/quark_sign_push.today"
 
-def is_today_finished():
+def is_today_pushed():
     if not os.path.exists(PUSH_FLAG_FILE):
         return False
     try:
@@ -16,14 +16,14 @@ def is_today_finished():
     except:
         return False
 
-def mark_today_finished():
+def mark_today_pushed():
     try:
         with open(PUSH_FLAG_FILE, "w", encoding="utf-8") as f:
             f.write(datetime.now().strftime("%Y-%m-%d"))
-    except Exception as e:
-        print(f"标记文件写入失败: {str(e)}")
+    except:
+        pass
 
-# ===================== 【Server酱推送】 =====================
+# ===================== 【新增】Server酱推送 =====================
 def server_push(title, content):
     sckey = os.getenv("SCKEY", "")
     if not sckey:
@@ -33,26 +33,30 @@ def server_push(title, content):
     try:
         requests.post(url, data=data, timeout=10)
     except Exception as e:
-        print("Server酱推送失败：", str(e))
+        print("推送失败：", str(e))
 
-# ===================== 【防风控请求头 iPhone/iPad 专属】 =====================
+# ===================== 【新增】iPhone防风控请求头 =====================
 headers = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4 Mobile/15E148",
     "Referer": "https://drive-m.quark.cn/"
 }
 
+# 替代 notify 功能（原作者代码，仅加推送）
 def send(title, message):
     print(f"{title}: {message}")
-    server_push(title, message)
+    if not is_today_pushed():
+        server_push(title, message)
+        mark_today_pushed()
 
-def get_env():
-    if "COOKIE_QUARK" in os.environ:
-        cookie_list = re.split('\n|&&', os.environ.get('COOKIE_QUARK'))
-    else:
-        print('❌未添加COOKIE_QUARK变量')
-        send('夸克自动签到', '❌未添加COOKIE_QUARK变量')
-        sys.exit(0)
-    return cookie_list
+# 获取环境变量 
+def get_env(): 
+    if "COOKIE_QUARK" in os.environ: 
+        cookie_list = re.split('\n|&&', os.environ.get('COOKIE_QUARK')) 
+    else: 
+        print('❌未添加COOKIE_QUARK变量') 
+        send('夸克自动签到', '❌未添加COOKIE_QUARK变量') 
+        sys.exit(0) 
+    return cookie_list 
 
 class Quark:
     def __init__(self, user_data):
@@ -95,7 +99,7 @@ class Quark:
         if response.get("data"):
             return True, response["data"]["sign_daily_reward"]
         else:
-            return False, response.get("msg", "签到失败，未知错误")
+            return False, response["message"]
 
     def queryBalance(self):
         url = "https://coral2.quark.cn/currency/v1/queryBalance"
@@ -123,34 +127,31 @@ class Quark:
                 log += "0 MB\n"
             if growth_info["cap_sign"]["sign_daily"]:
                 log += (
-                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}\n"
+                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}，"
                     f"连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})\n"
                 )
             else:
                 sign, sign_return = self.get_growth_sign()
                 if sign:
                     log += (
-                        f"✅ 执行签到: 今日签到+{self.convert_bytes(sign_return)}\n"
+                        f"✅ 执行签到: 今日签到+{self.convert_bytes(sign_return)}，"
                         f"连签进度({growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']})\n"
                     )
                 else:
                     log += f"❌ 签到异常: {sign_return}\n"
         else:
-            log += "❌ 签到异常: 获取成长信息失败\n"
+            raise Exception("❌ 签到异常: 获取成长信息失败")
+
         return log
 
 
 def main():
-    if is_today_finished():
-        print("ℹ️ 今日已完成推送，跳过本次运行（上午失败下午会自动重试）")
-        return
-
     msg = ""
     cookie_quark = get_env()
+
     print("✅ 检测到共", len(cookie_quark), "个夸克账号\n")
 
     i = 0
-    has_error = False
     while i < len(cookie_quark):
         user_data = {}
         for a in cookie_quark[i].replace(" ", "").split(';'):
@@ -160,22 +161,16 @@ def main():
         msg += log
         log = Quark(user_data).do_sign()
         msg += log + "\n"
-        if "❌" in log:
-            has_error = True
+
         i += 1
 
     try:
-        if has_error:
-            send("夸克签到【失败】", "签到执行失败，请前往GitHub Actions查看详细日志！\n\n" + msg)
-        else:
-            send("夸克自动签到【成功】", msg)
-        mark_today_finished()
+        send('夸克自动签到', msg)
     except Exception as err:
-        print(f"{err}\n❌ 脚本运行错误！")
-        send("夸克签到【脚本异常】", f"脚本出错：{str(err)}，请检查Actions日志")
-        mark_today_finished()
+        print('%s\n❌ 错误，请查看运行日志！' % err)
+        send('夸克签到【异常】', f'脚本出错：{str(err)}')
 
-    return msg[:-1] if msg else ""
+    return msg[:-1]
 
 
 if __name__ == "__main__":

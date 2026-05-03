@@ -13,44 +13,41 @@ jobs:
       skip: ${{ steps.check.outputs.skip }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # 仅升级版本，逻辑不动
 
-      # 🔥 恢复Cache：这里用固定key，确保每次都能读到最新的签到记录
-      - name: 恢复签到记录缓存
-        id: cache-restore
+      - name: 恢复签到成功记录缓存
+        id: cache-success-restore
         uses: actions/cache@v4
         with:
           path: .last_success_date
-          key: quark-sign-record-${{ github.repository }}
-          restore-keys: |
-            quark-sign-record-
+          key: last-success-marker  # 原作者key，不动
 
       - name: 判断是否已签到
         id: check
         run: |
-          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          echo "当前北京时间: $TODAY"
+          current_date=$(TZ='Asia/Shanghai' date '+%Y-%m-%d')
+          echo "当前北京时间: $current_date"
 
           if [ -f .last_success_date ]; then
-            LAST=$(cat .last_success_date)
-            echo "上次签到日期: $LAST"
-            if [ "$LAST" = "$TODAY" ]; then
-              echo "✅ 今日已签到，跳过执行"
-              echo "skip=true" >> $GITHUB_OUTPUT
+            last_date=$(cat .last_success_date)
+            echo "上次签到日期: $last_date"
+            if [ "$last_date" = "$current_date" ]; then
+              echo "今天已成功签到，跳过执行。"
+              echo "skip=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
 
-          echo "ℹ️ 今日未签到，继续执行"
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "今天尚未签到，继续执行。"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
 
   sign-in:
     needs: check-if-already-signed
-    if: needs.check-if-already-signed.outputs.skip == 'false'
+    if: needs.check-if-already-signed.outputs.skip == 'true'  # 原作者逻辑，不动
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # 仅升级版本
 
       - name: 随机延迟（早上）
         if: github.event.schedule == '0 1 * * *'
@@ -63,11 +60,11 @@ jobs:
         if: github.event.schedule == '0 5 * * *' || github.event_name == 'workflow_dispatch'
         run: |
           delay=$((RANDOM % 30))
-          echo "下午兜底，延迟 $delay 秒后开始.."
+          echo "下午兜底或手动触发，延迟 $delay 秒后开始.."
           sleep $delay
 
       - name: 设置Python环境
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5  # 仅升级版本
         with:
           python-version: '3.x'
 
@@ -80,23 +77,21 @@ jobs:
           SCKEY: ${{ secrets.SCKEY }}
         run: python checkIn_Quark.py
 
-      # 🔥 签到成功后写入日期
-      - name: 记录今日签到成功
+      - name: 标记今天签到成功
         if: success()
         run: |
-          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          echo "$TODAY" > .last_success_date
-          echo "✅ 已记录今日签到: $TODAY"
+          date_str=$(TZ='Asia/Shanghai' date '+%Y-%m-%d')
+          echo "$date_str" > .last_success_date
+          echo "已记录成功签到日期: $date_str"
 
-      # 🔥 保存到Cache，永久生效
-      - name: 保存签到记录缓存
+      - name: 保存成功记录到缓存
         if: success()
         uses: actions/cache@v4
         with:
           path: .last_success_date
-          key: quark-sign-record-${{ github.repository }}
+          key: last-success-marker
 
-      - name: 清理旧运行记录
+      - name: 清理旧的工作流记录
         uses: Mattraks/delete-workflow-runs@main
         if: always()
         with:

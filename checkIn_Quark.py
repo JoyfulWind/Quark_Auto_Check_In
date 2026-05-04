@@ -2,7 +2,7 @@ import os
 import re 
 import sys 
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta  # 【修复1：导入时区模块】
 
 # ===================== 一天仅推送1次（防重复推送） =====================
 PUSH_FLAG_FILE = "/tmp/quark_sign_push.today"
@@ -11,15 +11,19 @@ def is_today_pushed():
     if not os.path.exists(PUSH_FLAG_FILE):
         return False
     try:
+        # 【修复2：统一时区为上海，避免UTC与北京时间差异导致的判断错误】
+        current_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
         with open(PUSH_FLAG_FILE, "r", encoding="utf-8") as f:
-            return f.read().strip() == datetime.now().strftime("%Y-%m-%d")
+            return f.read().strip() == current_date
     except:
         return False
 
 def mark_today_pushed():
     try:
+        # 【修复2：统一时区为上海】
+        current_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
         with open(PUSH_FLAG_FILE, "w", encoding="utf-8") as f:
-            f.write(datetime.now().strftime("%Y-%m-%d"))
+            f.write(current_date)
     except:
         pass
 
@@ -107,8 +111,7 @@ class Quark:
             if response.get("data"):
                 return True, response["data"]["sign_daily_reward"]
             else:
-                # 兼容接口返回的错误字段
-                err_msg = response.get("message", response.get("msg", "签到失败，未知错误"))
+                err_msg = response.get("message", "签到失败，未知错误")
                 return False, err_msg
         except Exception as e:
             return False, f"签到请求异常: {str(e)}"

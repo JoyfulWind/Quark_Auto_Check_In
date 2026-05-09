@@ -1,25 +1,35 @@
 name: Quark签到
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每天09:00仅一次
+    - cron: '0 1 * * *'  # 每天北京时间09:00执行一次
   workflow_dispatch:
 
 jobs:
   sign-in:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: sleep $((RANDOM % 30))
-      - uses: actions/setup-python@v5
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 随机延迟（防风控）
+        run: sleep $((RANDOM % 30))
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
         with:
           python-version: 3.x
-      - run: pip install requests
-      - name: 执行签到
+
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 执行签到脚本
         env:
           COOKIE_QUARK: ${{ secrets.COOKIE_QUARK }}
           SCKEY: ${{ secrets.SCKEY }}
         run: python checkIn_Quark.py
-      - uses: Mattraks/delete-workflow-runs@main
+
+      - name: 清理旧运行记录
+        uses: Mattraks/delete-workflow-runs@main
         if: always()
         with:
           token: ${{ github.token }}

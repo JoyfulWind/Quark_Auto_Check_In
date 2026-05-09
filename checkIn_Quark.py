@@ -15,13 +15,7 @@ def server_push(title, content):
     except Exception as e:
         print("推送失败：", str(e))
 
-# ===================== iPhone防风控请求头 =====================
-headers = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4 Mobile/15E148",
-    "Referer": "https://drive-m.quark.cn/"
-}
-
-# 日志+推送
+# 日志+推送统一入口
 def send(title, message):
     print(f"{title}: {message}")
     server_push(title, message)
@@ -36,6 +30,12 @@ def get_env():
         sys.exit(0) 
     return cookie_list 
 
+# ===================== iPhone防风控请求头（完全保留你的配置） =====================
+headers = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4 Mobile/15E148",
+    "Referer": "https://drive-m.quark.cn/"
+}
+
 class Quark:
     def __init__(self, user_data):
         self.param = user_data
@@ -49,7 +49,7 @@ class Quark:
             i += 1
         return f"{b:.2f} {units[i]}"
 
-    # 获取用户信息
+    # 获取用户签到信息
     def get_growth_info(self):
         url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/info"
         querystring = {
@@ -87,7 +87,7 @@ class Quark:
         except Exception as e:
             return False, f"签到请求异常: {str(e)}"
 
-    # 签到主逻辑（✅ 无任何已签到判断，直接执行）
+    # 签到主逻辑（仅保留接口自带的已签到判断，无任何本地缓存）
     def do_sign(self):
         log = ""
         growth_info = self.get_growth_info()
@@ -95,21 +95,30 @@ class Quark:
             log += (
                 f" {'88VIP' if growth_info['88VIP'] else '普通用户'} {self.param.get('user', '')}\n"
                 f"💾 网盘总容量：{self.convert_bytes(growth_info['total_capacity'])}\n"
-                f"签到累计容量：{self.convert_bytes(growth_info['cap_composition'].get('sign_reward', 0))}\n"
+                f"签到累计容量："
             )
-            # ==============================================
-            # 🔥 这里彻底删除了「今日已签到」判断，直接签到
-            # ==============================================
-            sign, sign_return = self.get_growth_sign()
-            if sign:
+            if "sign_reward" in growth_info['cap_composition']:
+                log += f"{self.convert_bytes(growth_info['cap_composition']['sign_reward'])}\n"
+            else:
+                log += "0 MB\n"
+            
+            # 仅判断夸克官方接口返回的已签到状态（必须保留，否则重复签到报错）
+            if growth_info["cap_sign"]["sign_daily"]:
                 log += (
-                    f"✅ 签到成功: +{self.convert_bytes(sign_return)}\n"
-                    f"连签进度({growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']})\n"
+                    f"✅ 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}\n"
+                    f"连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})\n"
                 )
             else:
-                log += f"❌ 签到失败: {sign_return}\n"
+                sign, sign_return = self.get_growth_sign()
+                if sign:
+                    log += (
+                        f"✅ 签到成功: +{self.convert_bytes(sign_return)}\n"
+                        f"连签进度({growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']})\n"
+                    )
+                else:
+                    log += f"❌ 签到异常: {sign_return}\n"
         else:
-            log += "❌ 签到异常: 获取成长信息失败\n"
+            log += "❌ 签到异常: 获取成长信息失败（Cookie可能无效）\n"
         return log
 
 
@@ -122,20 +131,22 @@ def main():
     for i, cookie in enumerate(cookie_quark, 1):
         user_data = {}
         for a in cookie.replace(" ", "").split(';'):
-            if '=' in a:
+            if not a == '' and '=' in a:
                 k, v = a.split('=', 1)
                 user_data[k] = v
         log = f"🙍🏻‍♂️ 第{i}个账号\n"
         msg += log
         log = Quark(user_data).do_sign()
         msg += log + "\n"
-        if "❌" in log:
+        # 仅将真正的错误标记为异常（重复签到/已签到不算错误）
+        if "❌" in log and "重复" not in log and "已签到" not in log:
             has_error = True
 
+    # 推送结果
     if has_error:
-        send('夸克签到【异常】', msg)
+        send('夸克签到【部分异常】', msg)
     else:
-        send('夸克签到【成功】', msg)
+        send('夸克签到【正常完成】', msg)
 
 if __name__ == "__main__":
     print("----------夸克网盘开始签到----------")

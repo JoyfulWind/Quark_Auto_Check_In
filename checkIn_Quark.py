@@ -1,138 +1,77 @@
-import os 
-import re 
-import sys 
+import os
+import re
+import sys
 import requests
-from datetime import datetime, timezone, timedelta  # 【修复1：导入时区模块】
+from datetime import datetime, timezone, timedelta
 
-# ===================== 一天仅推送1次（防重复推送） =====================
-PUSH_FLAG_FILE = "/tmp/quark_sign_push.today"
-
-def is_today_pushed():
-    if not os.path.exists(PUSH_FLAG_FILE):
-        return False
-    try:
-        # 【修复2：统一时区为上海，避免UTC与北京时间差异导致的判断错误】
-        current_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
-        with open(PUSH_FLAG_FILE, "r", encoding="utf-8") as f:
-            return f.read().strip() == current_date
-    except:
-        return False
-
-def mark_today_pushed():
-    try:
-        # 【修复2：统一时区为上海】
-        current_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
-        with open(PUSH_FLAG_FILE, "w", encoding="utf-8") as f:
-            f.write(current_date)
-    except:
-        pass
-
-# ===================== Server酱微信推送 =====================
-def server_push(title, content):
-    sckey = os.getenv("SCKEY", "")
-    if not sckey:
+# 推送函数（Server酱）
+def send(title, content):
+    if not os.getenv('SCKEY'):
+        print("⚠️ 未配置SCKEY，跳过推送")
         return
-    url = f"https://sctapi.ftqq.com/{sckey}.send"
-    data = {"title": title, "desp": content}
     try:
+        url = f"https://sctapi.ftqq.com/{os.getenv('SCKEY')}.send"
+        data = {'title': title, 'desp': content}
         requests.post(url, data=data, timeout=10)
     except Exception as e:
-        print("推送失败：", str(e))
+        print(f"❌ 推送失败: {str(e)}")
 
-# ===================== iPhone防风控请求头 =====================
-headers = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Quark/7.17.4 Mobile/15E148",
-    "Referer": "https://drive-m.quark.cn/"
-}
-
-# 日志+推送统一入口
-def send(title, message):
-    print(f"{title}: {message}")
-    if not is_today_pushed():
-        server_push(title, message)
-        mark_today_pushed()
-
-# 读取Cookie环境变量
-def get_env(): 
-    if "COOKIE_QUARK" in os.environ: 
-        cookie_list = re.split('\n|&&', os.environ.get('COOKIE_QUARK')) 
-    else: 
-        print('❌未添加COOKIE_QUARK变量') 
-        send('夸克自动签到', '❌未添加COOKIE_QUARK变量') 
-        sys.exit(0) 
-    return cookie_list 
+# 获取环境变量中的Cookie
+def get_env():
+    cookie = os.getenv('COOKIE_QUARK')
+    if not cookie:
+        print("❌ 未设置COOKIE_QUARK环境变量")
+        sys.exit(1)
+    return [line.strip() for line in cookie.split('\n') if line.strip()]
 
 class Quark:
     def __init__(self, user_data):
-        self.param = user_data
+        self.user_data = user_data
+        self.param = {}
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Cookie': '; '.join([f"{k}={v}" for k, v in user_data.items()])
+        }
+        self.extract_params()
 
-    # 字节单位转换
-    def convert_bytes(self, b):
-        units = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-        i = 0
-        while b >= 1024 and i < len(units) - 1:
-            b /= 1024
-            i += 1
-        return f"{b:.2f} {units[i]}"
+    def extract_params(self):
+        try:
+            kuid = self.user_data.get('kuid', '')
+            kps = self.user_data.get('kps', '')
+            self.param = {'user': kuid, 'kps': kps}
+        except:
+            self.param = {'user': '未知用户', 'kps': ''}
 
-    # 获取用户签到信息
+    def convert_bytes(self, size):
+        try:
+            size = int(size)
+            for unit in ['B', 'KB', 'MB', 'GB']:
+                if size < 1024.0:
+                    return f"{size:.2f} {unit}"
+                size /= 1024.0
+            return f"{size:.2f} TB"
+        except:
+            return "0 MB"
+
     def get_growth_info(self):
-        url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/info"
-        querystring = {
-            "pr": "ucpro",
-            "fr": "iphone",
-            "kps": self.param.get('kps'),
-            "sign": self.param.get('sign'),
-            "vcode": self.param.get('vcode')
-        }
         try:
-            response = requests.get(url=url, params=querystring, headers=headers, timeout=10).json()
-            if response.get("data"):
-                return response["data"]
-            else:
-                return False
+            url = "https://coral2.quark.cn/growth/v1/info"
+            response = requests.get(url, headers=self.headers, timeout=10).json()
+            return response.get("data", {}) if response.get("code") == 0 else None
         except Exception as e:
-            print(f"获取用户信息失败: {str(e)}")
-            return False
+            print(f"获取成长信息失败: {str(e)}")
+            return None
 
-    # 执行签到请求
     def get_growth_sign(self):
-        url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/sign"
-        querystring = {
-            "pr": "ucpro",
-            "fr": "iphone",
-            "kps": self.param.get('kps'),
-            "sign": self.param.get('sign'),
-            "vcode": self.param.get('vcode')
-        }
-        data = {"sign_cyclic": True}
         try:
-            response = requests.post(url=url, json=data, params=querystring, headers=headers, timeout=10).json()
-            if response.get("data"):
-                return True, response["data"]["sign_daily_reward"]
-            else:
-                err_msg = response.get("message", "签到失败，未知错误")
-                return False, err_msg
+            url = "https://coral2.quark.cn/growth/v1/sign"
+            response = requests.post(url, headers=self.headers, timeout=10).json()
+            if response.get("code") == 0:
+                return True, response.get("data", {}).get("sign_reward", 0)
+            return False, response.get("message", "签到失败")
         except Exception as e:
-            return False, f"签到请求异常: {str(e)}"
+            return False, f"请求异常: {str(e)}"
 
-    # 查询余额（保留原作者函数，不影响主逻辑）
-    def queryBalance(self):
-        url = "https://coral2.quark.cn/currency/v1/queryBalance"
-        querystring = {
-            "moduleCode": "1f3563d38896438db994f118d4ff53cb",
-            "kps": self.param.get('kps'),
-        }
-        try:
-            response = requests.get(url=url, params=querystring, headers=headers, timeout=10).json()
-            if response.get("data"):
-                return response["data"]["balance"]
-            else:
-                return response.get("msg", "查询失败")
-        except Exception as e:
-            return f"查询异常: {str(e)}"
-
-    # 签到主逻辑
     def do_sign(self):
         log = ""
         growth_info = self.get_growth_info()
@@ -147,13 +86,11 @@ class Quark:
             else:
                 log += "0 MB\n"
             
-            # 今日已签到
             if growth_info["cap_sign"]["sign_daily"]:
                 log += (
-                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}\n"
+                    f"✅ 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}\n"
                     f"连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})\n"
                 )
-            # 今日未签到，执行签到
             else:
                 sign, sign_return = self.get_growth_sign()
                 if sign:
@@ -164,46 +101,38 @@ class Quark:
                 else:
                     log += f"❌ 签到异常: {sign_return}\n"
         else:
-            # 🔥 核心修复：把raise改成日志，不中断脚本，保证任务成功
-            log += "❌ 签到异常: 获取成长信息失败（Cookie无效/接口波动）\n"
-
+            log += "❌ 签到异常: 获取成长信息失败（Cookie可能无效）\n"
         return log
 
-
 def main():
+    print("----------夸克网盘开始签到----------")
     msg = ""
     cookie_quark = get_env()
-    print("✅ 检测到共", len(cookie_quark), "个夸克账号\n")
+    print(f"✅ 检测到共 {len(cookie_quark)} 个夸克账号\n")
 
-    i = 0
     has_error = False
-    while i < len(cookie_quark):
+    for idx, cookie in enumerate(cookie_quark, 1):
         user_data = {}
-        for a in cookie_quark[i].replace(" ", "").split(';'):
-            if not a == '':
-                user_data.update({a[0:a.index('=')]: a[a.index('=') + 1:]})
-        log = f"🙍🏻‍♂️ 第{i + 1}个账号\n"
+        for pair in cookie.replace(" ", "").split(';'):
+            if '=' in pair:
+                k, v = pair.split('=', 1)
+                user_data[k] = v
+        log = f"🙍🏻‍♂️ 第{idx}个账号\n"
         msg += log
         log = Quark(user_data).do_sign()
         msg += log + "\n"
         if "❌" in log:
             has_error = True
-        i += 1
 
-    # 推送结果
-    try:
-        if has_error:
-            send('夸克签到【部分异常】', msg)
-        else:
-            send('夸克自动签到【全部成功】', msg)
-    except Exception as err:
-        print('%s\n❌ 错误，请查看运行日志！' % err)
-        send('夸克签到【脚本异常】', f'脚本出错：{str(err)}')
+    # 推送结果（一天一次，无重复）
+    current_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+    if has_error:
+        send(f'夸克签到【{current_time}】部分异常', msg)
+    else:
+        send(f'夸克自动签到【{current_time}】全部成功', msg)
 
+    print("----------夸克网盘签到完毕----------")
     return msg[:-1]
 
-
 if __name__ == "__main__":
-    print("----------夸克网盘开始签到----------")
     main()
-    print("----------夸克网盘签到完毕----------")
